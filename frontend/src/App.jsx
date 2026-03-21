@@ -9,6 +9,13 @@ export default function App() {
   const [apps, setApps] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [activeTab, setActiveTab] = useState('search')
+  const [favorites, setFavorites] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('gplay-favorites') || '[]')
+    } catch { return [] }
+  })
+  const [devStats, setDevStats] = useState(null)
 
   const langCountryMap = {
     'ko-KR': { lang: 'ko', country: 'kr', label: '🇰🇷 한국어 (대한민국)' },
@@ -25,28 +32,40 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    localStorage.setItem('gplay-favorites', JSON.stringify(favorites))
+  }, [favorites])
+
+  const toggleFavorite = (app) => {
+    setFavorites(prev => {
+      const exists = prev.find(f => f.appId === app.appId)
+      if (exists) return prev.filter(f => f.appId !== app.appId)
+      return [...prev, { appId: app.appId, title: app.title, icon: app.icon, developer: app.developer, score: app.score, installs: app.installs }]
+    })
+  }
+
+  const isFavorite = (appId) => favorites.some(f => f.appId === appId)
+
   const handleSearch = async (term = searchTerm, type = searchType, lc = langCountry) => {
     if (!term.trim()) return
-    
+
     setLoading(true)
     setError(null)
-    
+    setDevStats(null)
+    setActiveTab('search')
+
     const { lang, country } = langCountryMap[lc]
-    const params = new URLSearchParams({
-      query: term,
-      search_type: type,
-      lang,
-      country,
-    })
+    const params = new URLSearchParams({ query: term, search_type: type, lang, country })
 
     window.history.pushState({}, '', `?search_type=${type}&lang_country=${lc}&search_term=${term}`)
 
     try {
       const res = await fetch(`${API_URL}/api/search?${params}`)
       const data = await res.json()
-      
+
       if (data.success) {
-        setApps(data.apps)
+        setApps(data.apps || [])
+        if (data.developer_stats) setDevStats(data.developer_stats)
       } else {
         setError(data.error)
       }
@@ -62,48 +81,56 @@ export default function App() {
     handleSearch()
   }
 
+  const displayApps = activeTab === 'favorites' ? favorites : apps
+
+  const formatNumber = (n) => {
+    if (!n) return '0'
+    if (typeof n === 'string') n = parseInt(n.replace(/[,+]/g, ''), 10)
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B'
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'
+    return n.toString()
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
-      <div className="max-w-7xl mx-auto px-4 py-12">
+    <div className="min-h-screen bg-[#fafafa]" style={{ fontFamily: "'Inter', 'Pretendard', sans-serif" }}>
+      <div className="max-w-4xl mx-auto px-4 py-12">
         {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-4">
-            Google Play Search
+        <div className="mb-10">
+          <h1 className="text-4xl font-black tracking-tight text-[#0a0a0a] mb-1">
+            GPLAY SEARCH
           </h1>
-          <p className="text-gray-600 text-lg">앱 검색, 개발자 검색을 한 번에</p>
+          <p className="text-[#666] text-sm tracking-wide uppercase">Google Play App & Developer Search</p>
         </div>
 
         {/* Search Form */}
-        <form onSubmit={onSubmit} className="bg-white rounded-2xl shadow-xl p-8 mb-12 border border-gray-100">
-          <div className="grid md:grid-cols-2 gap-6 mb-6">
-            {/* Search Type */}
+        <form onSubmit={onSubmit} className="bg-white border-2 border-[#0a0a0a] p-6 mb-8">
+          <div className="grid md:grid-cols-2 gap-4 mb-4">
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-3">검색 유형</label>
-              <div className="flex gap-4">
+              <label className="block text-xs font-bold text-[#0a0a0a] mb-2 uppercase tracking-wider">Type</label>
+              <div className="flex gap-2">
                 {['Keyword', 'Developer ID'].map(type => (
                   <button
                     key={type}
                     type="button"
                     onClick={() => setSearchType(type)}
-                    className={`flex-1 py-3 px-4 rounded-xl font-medium transition-all ${
+                    className={`flex-1 py-2 px-3 text-sm font-bold border-2 transition-colors ${
                       searchType === type
-                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        ? 'bg-[#0a0a0a] text-white border-[#0a0a0a]'
+                        : 'bg-white text-[#0a0a0a] border-[#ddd] hover:border-[#0a0a0a]'
                     }`}
                   >
-                    {type === 'Keyword' ? '🔍 키워드' : '👨‍💻 개발자'}
+                    {type === 'Keyword' ? 'KEYWORD' : 'DEVELOPER'}
                   </button>
                 ))}
               </div>
             </div>
-
-            {/* Language/Country */}
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-3">언어 / 국가</label>
+              <label className="block text-xs font-bold text-[#0a0a0a] mb-2 uppercase tracking-wider">Region</label>
               <select
                 value={langCountry}
                 onChange={(e) => setLangCountry(e.target.value)}
-                className="w-full py-3 px-4 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
+                className="w-full py-2 px-3 border-2 border-[#ddd] text-sm font-medium focus:border-[#0a0a0a] outline-none"
               >
                 {Object.entries(langCountryMap).map(([key, { label }]) => (
                   <option key={key} value={key}>{label}</option>
@@ -112,98 +139,149 @@ export default function App() {
             </div>
           </div>
 
-          {/* Search Input */}
-          <div className="mb-6">
+          <div className="flex gap-2">
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="검색어를 입력하세요..."
-              className="w-full py-4 px-6 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 text-lg transition-all"
+              placeholder="Search..."
+              className="flex-1 py-3 px-4 border-2 border-[#ddd] text-base font-medium focus:border-[#0a0a0a] outline-none"
             />
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-8 py-3 bg-[#0a0a0a] text-white font-bold text-sm uppercase tracking-wider hover:bg-[#333] transition-colors disabled:opacity-50"
+            >
+              {loading ? '...' : 'SEARCH'}
+            </button>
           </div>
-
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-4 rounded-xl font-semibold text-lg hover:shadow-xl hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? '🔄 검색 중...' : '🚀 앱 검색'}
-          </button>
         </form>
+
+        {/* Tabs */}
+        <div className="flex gap-0 mb-6 border-b-2 border-[#0a0a0a]">
+          <button
+            onClick={() => setActiveTab('search')}
+            className={`px-6 py-3 text-sm font-bold uppercase tracking-wider border-2 border-b-0 transition-colors ${
+              activeTab === 'search'
+                ? 'bg-[#0a0a0a] text-white border-[#0a0a0a]'
+                : 'bg-white text-[#999] border-transparent hover:text-[#0a0a0a]'
+            }`}
+          >
+            Results {apps.length > 0 && `(${apps.length})`}
+          </button>
+          <button
+            onClick={() => setActiveTab('favorites')}
+            className={`px-6 py-3 text-sm font-bold uppercase tracking-wider border-2 border-b-0 transition-colors ${
+              activeTab === 'favorites'
+                ? 'bg-[#0a0a0a] text-white border-[#0a0a0a]'
+                : 'bg-white text-[#999] border-transparent hover:text-[#0a0a0a]'
+            }`}
+          >
+            Favorites {favorites.length > 0 && `(${favorites.length})`}
+          </button>
+        </div>
 
         {/* Error */}
         {error && (
-          <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-xl mb-12">
-            <p className="text-red-700 font-medium">❌ 오류: {error}</p>
+          <div className="bg-white border-2 border-red-600 p-4 mb-6">
+            <p className="text-red-600 font-bold text-sm">{error}</p>
+          </div>
+        )}
+
+        {/* Developer Stats */}
+        {devStats && activeTab === 'search' && (
+          <div className="bg-white border-2 border-[#0a0a0a] p-6 mb-6">
+            <h3 className="text-lg font-black text-[#0a0a0a] mb-4 uppercase tracking-wider">Developer Stats</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              <div>
+                <p className="text-xs text-[#999] uppercase tracking-wider">Apps</p>
+                <p className="text-2xl font-black text-[#0a0a0a]">{devStats.total_apps}</p>
+              </div>
+              <div>
+                <p className="text-xs text-[#999] uppercase tracking-wider">Total Installs</p>
+                <p className="text-2xl font-black text-[#0a0a0a]">{formatNumber(devStats.total_installs)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-[#999] uppercase tracking-wider">Avg Rating</p>
+                <p className="text-2xl font-black text-[#0a0a0a]">{devStats.avg_rating?.toFixed(1) || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-[#999] uppercase tracking-wider">Free / Paid</p>
+                <p className="text-2xl font-black text-[#0a0a0a]">{devStats.free_count || 0} / {devStats.paid_count || 0}</p>
+              </div>
+            </div>
+            {devStats.genres && Object.keys(devStats.genres).length > 0 && (
+              <div className="border-t-2 border-[#eee] pt-4">
+                <p className="text-xs text-[#999] uppercase tracking-wider mb-2">Genres</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(devStats.genres).sort((a, b) => b[1] - a[1]).map(([genre, count]) => (
+                    <span key={genre} className="px-2 py-1 bg-[#f0f0f0] text-xs font-bold text-[#0a0a0a]">
+                      {genre} ({count})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* Results */}
-        {apps.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-gray-800">
-                검색 결과 <span className="text-indigo-600">({apps.length}개)</span>
-              </h2>
-            </div>
-
-            <div className="grid gap-6">
-              {apps.map((app, idx) => (
-                <div key={idx} className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all p-6 border border-gray-100">
-                  <div className="flex gap-6">
-                    {/* Icon */}
-                    <img
-                      src={app.icon}
-                      alt={app.title}
-                      className="w-24 h-24 rounded-2xl shadow-md flex-shrink-0"
-                    />
-
-                    {/* Info */}
-                    <div className="flex-1">
-                      <h3 className="text-xl font-bold text-gray-900 mb-2">{app.title}</h3>
-                      <p className="text-gray-600 mb-3">{app.developer}</p>
-                      
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <div>
-                          <span className="text-gray-500">⭐ 평점</span>
-                          <p className="font-semibold text-gray-900">{app.score?.toFixed(1) || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">📥 설치 수</span>
-                          <p className="font-semibold text-gray-900">{app.installs || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">📅 출시일</span>
-                          <p className="font-semibold text-gray-900">{app.release_date || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">🔄 업데이트</span>
-                          <p className="font-semibold text-gray-900">{app.update_date || 'N/A'}</p>
-                        </div>
+        {displayApps.length > 0 && (
+          <div className="space-y-3">
+            {displayApps.map((app, idx) => (
+              <div key={app.appId || idx} className="bg-white border-2 border-[#eee] hover:border-[#0a0a0a] transition-colors p-4">
+                <div className="flex gap-4">
+                  <img
+                    src={app.icon}
+                    alt={app.title}
+                    className="w-16 h-16 flex-shrink-0"
+                    style={{ imageRendering: 'auto' }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="text-base font-black text-[#0a0a0a] truncate">{app.title}</h3>
+                        <p className="text-sm text-[#666]">{app.developer}</p>
                       </div>
-
-                      <a
-                        href={`https://play.google.com/store/apps/details?id=${app.appId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-block mt-4 px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all font-medium"
+                      <button
+                        onClick={() => toggleFavorite(app)}
+                        className={`flex-shrink-0 w-8 h-8 flex items-center justify-center border-2 transition-colors ${
+                          isFavorite(app.appId)
+                            ? 'bg-[#0a0a0a] border-[#0a0a0a] text-white'
+                            : 'bg-white border-[#ddd] text-[#999] hover:border-[#0a0a0a]'
+                        }`}
+                        title={isFavorite(app.appId) ? 'Remove from favorites' : 'Add to favorites'}
                       >
-                        앱 보기 →
-                      </a>
+                        ★
+                      </button>
                     </div>
+                    <div className="flex gap-4 mt-2 text-xs text-[#999]">
+                      <span>⭐ {app.score?.toFixed(1) || '-'}</span>
+                      <span>📥 {app.installs || '-'}</span>
+                      {app.release_date && app.release_date !== 'N/A' && <span>📅 {app.release_date}</span>}
+                      {app.update_date && app.update_date !== 'N/A' && <span>🔄 {app.update_date}</span>}
+                    </div>
+                    <a
+                      href={`https://play.google.com/store/apps/details?id=${app.appId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block mt-2 text-xs font-bold text-[#0a0a0a] underline hover:no-underline"
+                    >
+                      PLAY STORE →
+                    </a>
                   </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
         )}
 
         {/* Empty State */}
-        {!loading && apps.length === 0 && searchTerm && (
+        {!loading && displayApps.length === 0 && (
           <div className="text-center py-16">
-            <p className="text-gray-500 text-lg">검색 결과가 없습니다</p>
+            <p className="text-[#999] text-sm uppercase tracking-wider">
+              {activeTab === 'favorites' ? 'No favorites yet' : searchTerm ? 'No results found' : 'Enter a search term'}
+            </p>
           </div>
         )}
       </div>
