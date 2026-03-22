@@ -24,9 +24,7 @@ app.add_middleware(
 executor = ThreadPoolExecutor(max_workers=10)
 
 # --- Rate Limiting (in-memory) ---
-# Structure: { "ip:1.2.3.4": {"date": "2026-03-22", "count": 3}, "user:abc123": {...} }
 rate_limit_store: dict = {}
-
 ANON_DAILY_LIMIT = 5
 AUTH_DAILY_LIMIT = 30
 
@@ -56,33 +54,12 @@ def _increment_rate(key: str):
 
 
 # --- Google OAuth Token Verification ---
-_google_certs_cache = {"certs": None, "fetched_at": None}
-
-
-def _get_google_certs():
-    now = datetime.now()
-    if _google_certs_cache["certs"] and _google_certs_cache["fetched_at"]:
-        diff = (now - _google_certs_cache["fetched_at"]).total_seconds()
-        if diff < 3600:
-            return _google_certs_cache["certs"]
-    # Fetch fresh certs
-    url = "https://www.googleapis.com/oauth2/v3/certs"
-    req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        certs = json.loads(resp.read())
-    _google_certs_cache["certs"] = certs
-    _google_certs_cache["fetched_at"] = now
-    return certs
-
-
 def _verify_google_token(token: str) -> Optional[dict]:
-    """Verify Google ID token using Google's tokeninfo endpoint."""
     try:
         url = f"https://oauth2.googleapis.com/tokeninfo?id_token={token}"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=5) as resp:
             payload = json.loads(resp.read())
-        # Verify audience matches our client ID
         if GOOGLE_CLIENT_ID and payload.get("aud") != GOOGLE_CLIENT_ID:
             return None
         return {
@@ -121,25 +98,24 @@ def get_rate_limit(request: Request, authorization: Optional[str] = Header(None)
     key, limit = _get_rate_key_and_limit(request, user_id)
     used, total = _check_rate_limit(key, limit)
     return {
-        "used": used,
-        "limit": total,
-        "remaining": total - used,
+        "used": used, "limit": total, "remaining": total - used,
         "authenticated": user is not None,
     }
 
 
 def _fetch_details(app_item: dict, lang: str, country: str) -> dict:
-    """Fetch one app's details (runs in thread pool)."""
+    """Fetch full app details."""
     try:
-        details = app_details(app_item['appId'], lang=lang, country=country)
+        d = app_details(app_item['appId'], lang=lang, country=country)
 
-        released = details.get('released', None)
+        # Release date
+        released = d.get('released')
         if released:
             try:
                 if '.' in released and released[0].isdigit():
-                    date_parts = released.replace('.', '').strip().split()
-                    if len(date_parts) == 3:
-                        app_item['release_date'] = f"{date_parts[0]}-{date_parts[1].zfill(2)}-{date_parts[2].zfill(2)}"
+                    parts = released.replace('.', '').strip().split()
+                    if len(parts) == 3:
+                        app_item['release_date'] = f"{parts[0]}-{parts[1].zfill(2)}-{parts[2].zfill(2)}"
                     else:
                         app_item['release_date'] = released
                 else:
@@ -150,23 +126,52 @@ def _fetch_details(app_item: dict, lang: str, country: str) -> dict:
         else:
             app_item['release_date'] = 'N/A'
 
-        updated = details.get('updated', None)
+        # Update date
+        updated = d.get('updated')
         if updated:
             app_item['update_date'] = datetime.fromtimestamp(updated).strftime('%Y-%m-%d')
         else:
             app_item['update_date'] = 'N/A'
 
-        app_item['free'] = details.get('free', True)
-        app_item['genre'] = details.get('genre', 'Unknown')
+        # All available detail fields
+        app_item['free'] = d.get('free', True)
+        app_item['price'] = d.get('price', 0)
+        app_item['currency'] = d.get('currency', 'USD')
+        app_item['genre'] = d.get('genre', 'Unknown')
+        app_item['genreId'] = d.get('genreId', '')
+        app_item['description'] = (d.get('description') or '')[:500]
+        app_item['summary'] = d.get('summary', '')
+        app_item['contentRating'] = d.get('contentRating', '')
+        app_item['adSupported'] = d.get('adSupported', False)
+        app_item['containsAds'] = d.get('containsAds', False)
+        app_item['reviews'] = d.get('reviews', 0)
+        app_item['ratings'] = d.get('ratings', 0)
+        app_item['histogram'] = d.get('histogram', [0, 0, 0, 0, 0])
+        app_item['version'] = d.get('version', 'N/A')
+        app_item['androidVersion'] = d.get('androidVersion', 'N/A')
+        app_item['minInstalls'] = d.get('minInstalls', 0)
+        app_item['maxInstalls'] = d.get('maxInstalls', 0)
+        app_item['realInstalls'] = d.get('realInstalls', 0)
+        app_item['developerEmail'] = d.get('developerEmail', '')
+        app_item['developerWebsite'] = d.get('developerWebsite', '')
+        app_item['developerAddress'] = d.get('developerAddress', '')
+        app_item['developerId'] = d.get('developerId', '')
+        app_item['privacyPolicy'] = d.get('privacyPolicy', '')
+        app_item['headerImage'] = d.get('headerImage', '')
+        app_item['screenshots'] = d.get('screenshots', [])[:5]
+        app_item['recentChanges'] = d.get('recentChanges', '')
+        app_item['sale'] = d.get('sale', False)
+        app_item['saleText'] = d.get('saleText', '')
+        app_item['originalPrice'] = d.get('originalPrice', 0)
+        app_item['inAppProductPrice'] = d.get('inAppProductPrice', '')
     except Exception:
-        app_item['release_date'] = 'N/A'
-        app_item['update_date'] = 'N/A'
+        app_item['release_date'] = app_item.get('release_date', 'N/A')
+        app_item['update_date'] = app_item.get('update_date', 'N/A')
 
     return app_item
 
 
 def _build_developer_stats(apps_list: list) -> dict:
-    """Build developer statistics from app list."""
     total_installs = 0
     scores = []
     genres = {}
@@ -174,19 +179,16 @@ def _build_developer_stats(apps_list: list) -> dict:
     paid_count = 0
 
     for a in apps_list:
-        installs_str = str(a.get('installs', '0')).replace(',', '').replace('+', '')
+        installs_str = str(a.get('realInstalls') or a.get('installs', '0')).replace(',', '').replace('+', '')
         try:
             total_installs += int(installs_str)
         except ValueError:
             pass
-
         score = a.get('score')
         if score:
             scores.append(float(score))
-
         genre = a.get('genre', 'Unknown')
         genres[genre] = genres.get(genre, 0) + 1
-
         if a.get('free', True):
             free_count += 1
         else:
@@ -212,7 +214,6 @@ def search_apps(
     limit: int = Query(20, ge=1, le=50),
     authorization: Optional[str] = Header(None),
 ):
-    # Rate limit check
     user = _extract_user_from_request(authorization)
     user_id = user["sub"] if user else None
     key, rate_limit = _get_rate_key_and_limit(request, user_id)
@@ -233,14 +234,10 @@ def search_apps(
 
         apps = search(search_query, n_hits=limit, lang=lang, country=country)
 
-        # Parallel detail fetching (max 8s wall-clock)
-        futures = {
-            executor.submit(_fetch_details, a, lang, country): a
-            for a in apps
-        }
+        futures = {executor.submit(_fetch_details, a, lang, country): a for a in apps}
         done = []
         processed_items = set()
-        for future in as_completed(futures, timeout=8):
+        for future in as_completed(futures, timeout=10):
             try:
                 result = future.result()
                 app_id = result.get('appId')
@@ -267,13 +264,10 @@ def search_apps(
                     done.append(item)
 
         done.sort(
-            key=lambda x: int(
-                str(x.get('installs', '0')).replace(',', '').replace('+', '') or 0
-            ),
+            key=lambda x: int(str(x.get('realInstalls') or x.get('installs', '0')).replace(',', '').replace('+', '') or 0),
             reverse=True,
         )
 
-        # Increment rate limit AFTER successful search
         _increment_rate(key)
         new_used = used + 1
 
