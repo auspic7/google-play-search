@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
 export default function App() {
   const [searchType, setSearchType] = useState('Keyword')
@@ -14,68 +13,15 @@ export default function App() {
   const [devStats, setDevStats] = useState(null)
   const [expandedApp, setExpandedApp] = useState(null)
 
-  // Developer favorites (not app favorites)
   const [devFavorites, setDevFavorites] = useState(() => {
     try { return JSON.parse(localStorage.getItem('gplay-dev-favorites') || '[]') } catch { return [] }
   })
-
-  // Auth
-  const [user, setUser] = useState(null)
-  const [token, setToken] = useState(() => localStorage.getItem('gplay-token') || null)
-  const googleBtnRef = useRef(null)
-  const [rateLimit, setRateLimit] = useState(null)
 
   const langCountryMap = {
     'ko-KR': { lang: 'ko', country: 'kr', label: '🇰🇷 한국어' },
     'en-US': { lang: 'en', country: 'us', label: '🇺🇸 English' },
     'ja-JP': { lang: 'ja', country: 'jp', label: '🇯🇵 日本語' },
   }
-
-  const authHeaders = useCallback(() => token ? { 'Authorization': `Bearer ${token}` } : {}, [token])
-
-  const fetchRateLimit = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/rate-limit`, { headers: authHeaders() })
-      const data = await res.json()
-      setRateLimit(data)
-    } catch { /* silent */ }
-  }, [authHeaders])
-
-  const handleCredentialResponse = useCallback(async (response) => {
-    const idToken = response.credential
-    try {
-      const res = await fetch(`${API_URL}/api/auth/verify`, {
-        headers: { 'Authorization': `Bearer ${idToken}` }
-      })
-      const data = await res.json()
-      if (data.authenticated) {
-        setUser(data.user)
-        setToken(idToken)
-        localStorage.setItem('gplay-token', idToken)
-      }
-    } catch (err) { console.error('Auth failed:', err) }
-  }, [])
-
-  useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) return
-    const init = () => {
-      if (!window.google?.accounts?.id) { setTimeout(init, 200); return }
-      window.google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: handleCredentialResponse, auto_select: false })
-      if (token) {
-        fetch(`${API_URL}/api/auth/verify`, { headers: { 'Authorization': `Bearer ${token}` } })
-          .then(r => r.json()).then(data => {
-            if (data.authenticated) setUser(data.user)
-            else { setToken(null); setUser(null); localStorage.removeItem('gplay-token') }
-          }).catch(() => { setToken(null); setUser(null); localStorage.removeItem('gplay-token') })
-      }
-      if (googleBtnRef.current) {
-        window.google.accounts.id.renderButton(googleBtnRef.current, { type: 'standard', theme: 'outline', size: 'large', width: 240 })
-      }
-    }
-    init()
-  }, [handleCredentialResponse, token])
-
-  useEffect(() => { fetchRateLimit() }, [fetchRateLimit])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -112,26 +58,19 @@ export default function App() {
     const params = new URLSearchParams({ query: term, search_type: type, lang, country })
     window.history.pushState({}, '', `?search_type=${type}&lang_country=${lc}&search_term=${term}`)
     try {
-      const res = await fetch(`${API_URL}/api/search?${params}`, { headers: authHeaders() })
+      const res = await fetch(`${API_URL}/api/search?${params}`)
       const data = await res.json()
       if (data.success) {
         setApps(data.apps || [])
         if (data.developer_stats) setDevStats(data.developer_stats)
-        if (data.rate_limit) setRateLimit(data.rate_limit)
       } else {
         setError(data.error)
-        if (data.rate_limit) setRateLimit(data.rate_limit)
       }
     } catch (err) { setError(err.message) }
     finally { setLoading(false) }
   }
 
   const onSubmit = (e) => { e.preventDefault(); handleSearch() }
-  const handleSignOut = () => {
-    setUser(null); setToken(null); localStorage.removeItem('gplay-token')
-    window.google?.accounts?.id?.disableAutoSelect(); fetchRateLimit()
-  }
-  const handleSignIn = () => { window.google?.accounts?.id?.prompt() }
 
   const formatNumber = (n) => {
     if (!n) return '0'
@@ -143,11 +82,8 @@ export default function App() {
     return n.toString()
   }
 
-  const isLimitReached = rateLimit && rateLimit.remaining <= 0
-  const limitDisplay = rateLimit ? `${rateLimit.used}/${rateLimit.limit}` : null
   const displayApps = activeTab === 'search' ? apps : []
 
-  // Rating bar component
   const RatingBar = ({ histogram }) => {
     if (!histogram || histogram.length < 5) return null
     const max = Math.max(...histogram, 1)
@@ -172,29 +108,13 @@ export default function App() {
             <h1 className="text-lg font-black tracking-tight cursor-pointer" onClick={() => window.location.href = '/'}>GPLAY</h1>
             <span className="text-[#555] text-xs hidden sm:inline">Google Play Analytics</span>
           </div>
-          <div className="flex items-center gap-3">
-            {user ? (
-              <div className="flex items-center gap-2">
-                <img src={user.picture} alt="" className="w-7 h-7 rounded-full border border-[#333]" referrerPolicy="no-referrer" />
-                <span className="text-sm text-[#ccc] hidden sm:inline">{user.name}</span>
-                <button onClick={handleSignOut} className="text-xs text-[#666] hover:text-white transition-colors ml-1">로그아웃</button>
-              </div>
-            ) : GOOGLE_CLIENT_ID ? (
-              <button onClick={handleSignIn} className="flex items-center gap-2 px-3 py-1.5 bg-white text-[#0a0a0a] text-xs font-bold rounded hover:bg-[#eee] transition-colors">
-                <svg className="w-4 h-4" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                로그인
-              </button>
-            ) : null}
-          </div>
         </div>
       </header>
-
-      <div ref={googleBtnRef} className="hidden" />
 
       <div className="max-w-5xl mx-auto px-4 py-6">
         {/* Search */}
         <form onSubmit={onSubmit} className="bg-white border-2 border-[#0a0a0a] p-5 mb-5">
-          <div className="grid md:grid-cols-3 gap-3 mb-3">
+          <div className="grid md:grid-cols-2 gap-3 mb-3">
             <div>
               <label className="block text-[10px] font-bold text-[#999] mb-1.5 uppercase tracking-widest">Type</label>
               <div className="flex gap-1.5">
@@ -213,31 +133,16 @@ export default function App() {
                 {Object.entries(langCountryMap).map(([key, { label }]) => <option key={key} value={key}>{label}</option>)}
               </select>
             </div>
-            <div className="flex items-end">
-              {limitDisplay && (
-                <div className={`flex items-center gap-1.5 px-3 py-2 border-2 text-xs font-bold w-full ${isLimitReached ? 'bg-red-50 border-red-400 text-red-600' : rateLimit?.remaining <= 3 ? 'bg-amber-50 border-amber-400 text-amber-700' : 'bg-[#f5f5f5] border-[#e0e0e0] text-[#666]'}`}>
-                  <span>{isLimitReached ? '🚫' : '🔍'}</span>
-                  <span>오늘 {limitDisplay}회</span>
-                  {!rateLimit?.authenticated && !isLimitReached && <span className="text-[10px] text-[#999] ml-auto">로그인 시 30회</span>}
-                </div>
-              )}
-            </div>
           </div>
           <div className="flex gap-2">
             <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
               placeholder={searchType === 'Keyword' ? '앱 이름이나 키워드...' : '개발사 ID...'}
               className="flex-1 py-3 px-4 border-2 border-[#e0e0e0] text-sm font-medium focus:border-[#0a0a0a] outline-none transition-colors" />
-            <button type="submit" disabled={loading || isLimitReached}
-              className={`px-6 py-3 font-bold text-xs uppercase tracking-wider transition-all min-w-[100px] ${isLimitReached ? 'bg-[#ccc] text-[#999] cursor-not-allowed' : 'bg-[#0a0a0a] text-white hover:bg-[#333]'}`}>
+            <button type="submit" disabled={loading}
+              className="px-6 py-3 font-bold text-xs uppercase tracking-wider transition-all min-w-[100px] bg-[#0a0a0a] text-white hover:bg-[#333]">
               {loading ? <span className="inline-flex items-center gap-1"><svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></span> : 'SEARCH'}
             </button>
           </div>
-          {isLimitReached && (
-            <div className="mt-3 p-3 bg-red-50 border-2 border-red-200 flex items-center justify-between">
-              <span className="text-xs text-red-700 font-medium">오늘 검색 한도 도달</span>
-              {!user && GOOGLE_CLIENT_ID && <button onClick={handleSignIn} className="text-xs font-bold text-[#0a0a0a] underline">로그인 → 30회</button>}
-            </div>
-          )}
         </form>
 
         {/* Tabs */}
@@ -253,7 +158,7 @@ export default function App() {
           ))}
         </div>
 
-        {error && error !== 'Daily search limit reached' && (
+        {error && (
           <div className="bg-white border-2 border-red-500 p-4 mb-5">
             <p className="text-red-600 font-bold text-xs">{error}</p>
           </div>
@@ -336,7 +241,6 @@ export default function App() {
               const isExpanded = expandedApp === app.appId
               return (
                 <div key={app.appId || idx} className="bg-white border-2 border-[#eee] hover:border-[#0a0a0a] transition-all group">
-                  {/* Main row */}
                   <div className="p-4 cursor-pointer" onClick={() => setExpandedApp(isExpanded ? null : app.appId)}>
                     <div className="flex gap-3">
                       <img src={app.icon} alt={app.title} className="w-14 h-14 rounded-xl flex-shrink-0 bg-[#f5f5f5]" />
@@ -367,11 +271,9 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Expanded details */}
                   {isExpanded && (
                     <div className="border-t-2 border-[#eee] p-4 bg-[#fafafa]">
                       <div className="grid md:grid-cols-2 gap-4">
-                        {/* Left: Info grid */}
                         <div className="space-y-3">
                           <div className="grid grid-cols-2 gap-2">
                             {[
@@ -391,7 +293,6 @@ export default function App() {
                             ))}
                           </div>
 
-                          {/* Rating histogram */}
                           {app.histogram && (
                             <div>
                               <p className="text-[10px] text-[#999] uppercase tracking-widest mb-1">평점 분포</p>
@@ -399,7 +300,6 @@ export default function App() {
                             </div>
                           )}
 
-                          {/* Recent changes */}
                           {app.recentChanges && (
                             <div>
                               <p className="text-[10px] text-[#999] uppercase tracking-widest mb-1">최근 변경사항</p>
@@ -408,7 +308,6 @@ export default function App() {
                           )}
                         </div>
 
-                        {/* Right: Description + Developer + Screenshots */}
                         <div className="space-y-3">
                           {app.description && (
                             <div>
@@ -417,7 +316,6 @@ export default function App() {
                             </div>
                           )}
 
-                          {/* Screenshots */}
                           {app.screenshots && app.screenshots.length > 0 && (
                             <div>
                               <p className="text-[10px] text-[#999] uppercase tracking-widest mb-1">스크린샷</p>
@@ -429,7 +327,6 @@ export default function App() {
                             </div>
                           )}
 
-                          {/* Developer info */}
                           <div className="border-t border-[#eee] pt-2">
                             <p className="text-[10px] text-[#999] uppercase tracking-widest mb-1">개발사 정보</p>
                             <div className="space-y-1 text-xs text-[#666]">
@@ -442,7 +339,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Action links */}
                       <div className="flex gap-3 mt-3 pt-3 border-t border-[#eee]">
                         <a href={`https://play.google.com/store/apps/details?id=${app.appId}`} target="_blank" rel="noopener noreferrer"
                           className="text-xs font-bold text-[#0a0a0a] underline hover:no-underline">PLAY STORE →</a>
@@ -457,7 +353,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Empty */}
         {!loading && activeTab === 'search' && displayApps.length === 0 && (
           <div className="text-center py-20">
             <div className="text-4xl mb-4">🔍</div>

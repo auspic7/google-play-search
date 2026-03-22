@@ -2,21 +2,31 @@ services:
   backend:
     build: ./backend
     container_name: gplay-backend
-    ports:
-      - "8000:8000"
-    environment:
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     restart: unless-stopped
+    ports:
+      - "8001:8000"
+    networks:
+      - default
+      - coolify
 
   frontend:
     build:
       context: ./frontend
       args:
         VITE_API_URL: ""
-        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     container_name: gplay-frontend
-    ports:
-      - "3000:80"
     depends_on:
       - backend
     restart: unless-stopped
+    ports:
+      - "8002:80"
+    networks:
+      - default
+      - coolify
+
+networks:
+  coolify:
+    external: true
