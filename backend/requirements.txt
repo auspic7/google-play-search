@@ -1,3 +1,4 @@
 fastapi
 uvicorn
 google-play-scraper
+python-multipart

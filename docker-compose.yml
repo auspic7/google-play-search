@@ -4,13 +4,16 @@ services:
     container_name: gplay-backend
     ports:
       - "8000:8000"
+    environment:
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: http://backend:8000
+        VITE_API_URL: ""
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     container_name: gplay-frontend
     ports:
       - "3000:80"
